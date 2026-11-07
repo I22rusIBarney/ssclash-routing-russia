@@ -1,0 +1,576 @@
+# ============================================================
+# ШАБЛОН MIHOMO ДЛЯ РОУТЕРА (OpenWrt + SSClash-Go) — BobrGO
+# Основан на шаблоне RoscomVPN для Remnawave.
+# Отличия от клиентского шаблона:
+#   • нет своего TUN с auto-route — перехват делает SSClash
+#     (tproxy-port / clash-tun, SSClash сам синхронизирует их при Start)
+#   • DNS: fake-ip-filter-mode: rule + Auto fake-ip whitelist в SSClash
+#   • Telegram по IP (geoip:telegram) — для приложений с зашитыми адресами
+#   • правила по имени процесса убраны (на роутере процессов нет)
+#   • 🤖 Нейросети — ИЗОЛИРОВАННАЯ группа:
+#       - только ручной выбор узла (select), без ⚡️ Авто и без DIRECT внутри
+#       - все локации, кроме РФ-узлов и служебных цепочек
+#       - правила нейросетей стоят В САМОМ ВЕРХУ, до рекламы/Microsoft/RU и т.д.
+#       - вспомогательные домены (капча Cloudflare, statsig, intercom, sentry,
+#         auth0, оплата Stripe, вход через Apple и т.п.) идут в ту же страну,
+#         чтобы сервис видел один IP
+#       - весь Google (кроме YouTube) и Google Play — туда же
+#       - DNS для этих доменов тоже резолвится через 🤖 Нейросети
+#   • ⚡️ Авто не выбирает РФ-узел YouTube и служебные цепочки «Обход белых списков»
+#   • Microsoft и Xbox идут в группу 🎮 Игры (выберите там 🛡️ VPN, чтобы завернуть в VPN)
+#
+# ВАЖНО: в режиме fake-ip SSClash отправляет в mihomo только трафик на адреса
+# fake-ip (198.18.x.x) и на IP из fake-ip whitelist. Соединение на НАСТОЯЩИЙ IP
+# идёт мимо VPN — с российского адреса. Чтобы нейросети не «моросили», в SSClash-Go
+# (Настройки) нужно закрыть обходы:
+#   • DNS → Firewall redirect (ловит «зашитый» DNS вроде 8.8.8.8:53)
+#   • DNS → Block DoT и Block known DoH (dibdot) — Android «Частный DNS», DoH в браузерах
+#   • Options → Drop forwarded IPv6 — IPv6 файрвол SSClash не перехватывает
+#   • Options → Kill switch — без интернета, пока mihomo перезапускается (иначе в это
+#     окно устройства получают настоящие IP и потом долго ходят напрямую)
+# Проверка, когда нейросеть снова ругается: откройте на этом устройстве
+#   https://chatgpt.com/cdn-cgi/trace  (или https://claude.ai/cdn-cgi/trace)
+#   loc=RU — запрос идёт мимо VPN (DNS/IPv6/обход); другая страна — не тот узел;
+#   нужная страна — дело не в маршруте, а в аккаунте/сессии или IP узла.
+# ============================================================
+
+mode: rule
+tproxy-port: 7894
+tun:
+  enable: true
+  device: clash-tun
+  stack: system
+  auto-route: false
+  auto-redirect: false
+  auto-detect-interface: false
+log-level: info
+allow-lan: false
+ipv6: false
+unified-delay: true
+tcp-concurrent: true
+external-controller: 127.0.0.1:9090
+find-process-mode: off
+profile:
+  store-selected: true
+  store-fake-ip: true
+
+dns:
+  enable: true
+  listen: 0.0.0.0:7874
+  ipv6: false
+  enhanced-mode: fake-ip # fake-ip/redir-host
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter-mode: rule
+  fake-ip-filter:
+    - RULE-SET,private-domains,real-ip # приватные домены — реальные адреса
+    - MATCH,fake-ip
+  default-nameserver:
+    - https://77.88.8.8/dns-query
+    - https://8.8.8.8/dns-query
+  proxy-server-nameserver:
+    - https://77.88.8.8/dns-query
+    - https://8.8.8.8/dns-query
+  direct-nameserver:
+    - https://77.88.8.8/dns-query
+    - https://8.8.8.8/dns-query
+  nameserver-policy:
+    # DNS нейросетей и Google — через ту же страну, что и их трафик
+    "rule-set:ai-extra,ai,google,google-play":
+      - https://8.8.8.8/dns-query#🤖 Нейросети
+      - https://1.1.1.1/dns-query#🤖 Нейросети
+  nameserver:
+    - https://8.8.8.8/dns-query#PROXY
+sniffer:
+  enable: true
+  override-destination: false
+  parse-pure-ip: true
+  sniff:
+    HTTP:
+      ports:
+        - 80
+        - 8080-8880
+    TLS:
+      ports:
+        - 443
+        - 8443
+  skip-dst-address: # исключить из сниффера приватные и зарезервированные IP-адреса
+    - 224.0.0.0/3
+    - 10.0.0.0/8
+    - 127.0.0.0/8
+    - 100.64.0.0/10
+    - 172.16.0.0/12
+    - 198.18.0.0/15
+    - 169.254.0.0/16
+    - 192.168.0.0/16
+    - 192.0.0.0/24
+    - 192.0.2.0/24
+    - 192.88.99.0/24
+    - 198.51.100.0/24
+    - 203.0.113.0/24
+    - fc00::/7
+    - ff00::/8
+    - fe80::/10
+    - ::/127
+proxies: # LEAVE THIS LINE!
+proxy-groups:
+  - name: 🛡️ VPN
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Hijacking.png
+    type: select
+    proxies:
+      - ⚡️ Авто
+    # LEAVE THIS LINE!
+    url: https://www.gstatic.com/generate_204
+  - name: 📺 Youtube
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/YouTube.png
+    type: select
+    remnawave:
+      include-proxies: false
+    include-all: true
+    # filter: '🇫🇮 Finland' # Filter connections containing this value (hosts should be named like 🇫🇮 Finland1, 🇫🇮 Finland2, etc.)
+    proxies:
+      - 🛡️ VPN
+      # Если хотите оставить на выбор только определенные узлы, воспользуйтесь filter
+  - name: 🎮 Игры
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Game.png
+    type: select
+    remnawave:
+      include-proxies: false
+    include-all: true
+    # Сюда же попадают Microsoft и Xbox. Чтобы они шли через VPN — выберите
+    # здесь 🛡️ VPN (или конкретный узел). По умолчанию первый пункт — 🔓 Без VPN.
+    proxies:
+      - 🔓 Без VPN
+      - 🛡️ VPN
+  - name: 🤖 Нейросети
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Bot.png
+    # Только ручной выбор конкретного узла. Внутри нет ⚡️ Авто, 🛡️ VPN и DIRECT,
+    # поэтому страна сама по себе никогда не меняется.
+    # Если нейронка ругается на регион — сначала проверьте /cdn-cgi/trace (см. шапку):
+    # переключение узла лишь рвёт соединения, а причина обычно в обходе мимо VPN.
+    type: select
+    exclude-filter: '🇷🇺|YouTube|Обход|🌀' # без РФ-узлов и служебных цепочек
+    remnawave:
+      include-proxies: false
+    include-all: true
+  - name: ⚡️ Авто
+    type: url-test
+    tolerance: 150
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    exclude-filter: '🇷🇺|YouTube|Обход|🌀' # без РФ-узла YouTube и служебных цепочек
+    remnawave:
+      include-proxies: false
+    include-all: true
+    hidden: true
+  - name: PROXY
+    type: select
+    hidden: true
+    remnawave:
+      include-proxies: false
+    proxies:
+      - 🛡️ VPN
+  - name: 🔓 Без VPN
+    type: select
+    hidden: true
+    remnawave:
+      include-proxies: false
+    proxies:
+      - DIRECT
+  - name: ⛔ Блок
+    type: select
+    hidden: true
+    remnawave:
+      include-proxies: false
+    proxies:
+      - REJECT
+  - name: ⏭️ Пропуск
+    type: select
+    hidden: true
+    remnawave:
+      include-proxies: false
+    proxies:
+      - PASS
+rule-providers:
+  ai-extra:
+    # Домены нейросетей + их вспомогательные сервисы (капча, фичефлаги,
+    # аналитика, авторизация, оплата), которых нет в category-ai-!cn.
+    # Сервисы сверяют IP этих запросов с IP основной сессии.
+    type: inline
+    behavior: domain
+    payload:
+      # OpenAI / ChatGPT
+      - '+.openai.com'
+      - '+.chatgpt.com'
+      - '+.oaistatic.com'
+      - '+.oaiusercontent.com'
+      - '+.sora.com'
+      - '+.livekit.cloud' # голосовой режим ChatGPT
+      - 'oaidalleapiprodscus.blob.core.windows.net' # картинки DALL·E (иначе — общий VPN)
+      # Anthropic / Claude
+      - '+.anthropic.com'
+      - '+.claude.ai'
+      - '+.claude.com'
+      - '+.claudeusercontent.com'
+      # Google AI
+      - '+.gemini.google.com'
+      - '+.aistudio.google.com'
+      - '+.generativelanguage.googleapis.com'
+      - '+.notebooklm.google'
+      - '+.notebooklm.google.com'
+      # Прочие
+      - '+.perplexity.ai'
+      - '+.pplx.ai'
+      - '+.grok.com'
+      - '+.x.ai'
+      - '+.mistral.ai'
+      - '+.deepseek.com'
+      - '+.cursor.com'
+      - '+.cursor.sh'
+      - '+.copilot.microsoft.com'
+      - '+.copilot.cloud.microsoft'
+      - '+.bing.com'
+      - '+.suno.com'
+      - '+.suno.ai'
+      - '+.character.ai'
+      # Вспомогательные сервисы
+      - '+.challenges.cloudflare.com' # Turnstile-капча
+      - '+.cloudflareinsights.com' # маячок Cloudflare на страницах нейросетей
+      - 'cloudflare-ech.com' # ECH скрывает настоящий домен: чаще всего это ChatGPT/Claude/Perplexity за Cloudflare
+      - '+.arkoselabs.com' # капча OpenAI
+      - '+.statsig.com'
+      - '+.statsigapi.net'
+      - '+.featuregates.org'
+      - '+.featureassets.org'
+      - '+.prodregistryv2.org'
+      - '+.growthbook.io' # фичефлаги
+      - '+.intercom.io'
+      - '+.intercomcdn.com'
+      - '+.intercomassets.com'
+      - '+.sentry.io'
+      - '+.auth0.com'
+      - '+.browser-intake-datadoghq.com'
+      - '+.segment.io'
+      - '+.segment.com'
+      - '+.stripe.com' # оплата подписок ChatGPT/Claude: страна карты сверяется с IP
+      - '+.stripe.network'
+      - '+.stripecdn.com'
+      - 'appleid.apple.com' # «Войти через Apple»
+      - 'appleid.cdn-apple.com'
+  ai:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/category-ai-!cn.mrs
+    path: ./rule-providers/ai.mrs
+    proxy: ⚡️ Авто
+    interval: 86400
+  google:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/google.mrs
+    path: ./rule-providers/google.mrs
+    proxy: ⚡️ Авто
+    interval: 86400
+  telegram-ips:
+    type: http
+    behavior: ipcidr
+    format: mrs
+    url: https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geoip/telegram.mrs
+    path: ./rule-providers/telegram-ips.mrs
+    proxy: ⚡️ Авто
+    interval: 86400
+  private-domains:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://cdn.jsdelivr.net/gh/hydraponique/roscomvpn-geosite/release/mihomo/private.mrs
+    path: ./rule-providers/geosite-private.mrs
+    proxy: ⚡️ Авто
+    interval: 2592000
+  category-ru:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://cdn.jsdelivr.net/gh/hydraponique/roscomvpn-geosite/release/mihomo/category-ru.mrs
+    path: ./rule-providers/category-ru.mrs
+    proxy: ⚡️ Авто
+    interval: 86400
+  whitelist:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://cdn.jsdelivr.net/gh/hydraponique/roscomvpn-geosite/release/mihomo/whitelist.mrs
+    path: ./rule-providers/whitelist.mrs
+    proxy: ⚡️ Авто
+    interval: 86400
+  microsoft:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://cdn.jsdelivr.net/gh/hydraponique/roscomvpn-geosite/release/mihomo/microsoft.mrs
+    path: ./rule-providers/microsoft.mrs
+    proxy: ⚡️ Авто
+    interval: 86400
+  apple:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://cdn.jsdelivr.net/gh/hydraponique/roscomvpn-geosite/release/mihomo/apple.mrs
+    path: ./rule-providers/apple.mrs
+    proxy: ⚡️ Авто
+    interval: 86400
+  google-play:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://cdn.jsdelivr.net/gh/hydraponique/roscomvpn-geosite/release/mihomo/google-play.mrs
+    path: ./rule-providers/google-play.mrs
+    proxy: ⚡️ Авто
+    interval: 86400
+  epicgames:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://cdn.jsdelivr.net/gh/hydraponique/roscomvpn-geosite/release/mihomo/epicgames.mrs
+    path: ./rule-providers/epicgames.mrs
+    proxy: ⚡️ Авто
+    interval: 86400
+  origin:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://cdn.jsdelivr.net/gh/hydraponique/roscomvpn-geosite/release/mihomo/origin.mrs
+    path: ./rule-providers/origin.mrs
+    proxy: ⚡️ Авто
+    interval: 86400
+  riot:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://cdn.jsdelivr.net/gh/hydraponique/roscomvpn-geosite/release/mihomo/riot.mrs
+    path: ./rule-providers/riot.mrs
+    proxy: ⚡️ Авто
+    interval: 86400
+  escapefromtarkov:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://cdn.jsdelivr.net/gh/hydraponique/roscomvpn-geosite/release/mihomo/escapefromtarkov.mrs
+    path: ./rule-providers/escapefromtarkov.mrs
+    proxy: ⚡️ Авто
+    interval: 86400
+  steam:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://cdn.jsdelivr.net/gh/hydraponique/roscomvpn-geosite/release/mihomo/steam.mrs
+    path: ./rule-providers/steam.mrs
+    proxy: ⚡️ Авто
+    interval: 86400
+  twitch:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://cdn.jsdelivr.net/gh/hydraponique/roscomvpn-geosite/release/mihomo/twitch.mrs
+    path: ./rule-providers/twitch.mrs
+    proxy: ⚡️ Авто
+    interval: 86400
+  pinterest:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://cdn.jsdelivr.net/gh/hydraponique/roscomvpn-geosite/release/mihomo/pinterest.mrs
+    path: ./rule-providers/pinterest.mrs
+    proxy: ⚡️ Авто
+    interval: 86400
+  faceit:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://cdn.jsdelivr.net/gh/hydraponique/roscomvpn-geosite/release/mihomo/faceit.mrs
+    path: ./rule-providers/faceit.mrs
+    proxy: ⚡️ Авто
+    interval: 86400
+  private-ips:
+    type: http
+    behavior: ipcidr
+    format: mrs
+    url: https://cdn.jsdelivr.net/gh/hydraponique/roscomvpn-geoip/release/mihomo/private.mrs
+    path: ./rule-providers/geoip-private.mrs
+    proxy: ⚡️ Авто
+    interval: 2592000
+  direct-ips:
+    type: http
+    behavior: ipcidr
+    format: mrs
+    url: https://cdn.jsdelivr.net/gh/hydraponique/roscomvpn-geoip/release/mihomo/direct.mrs
+    path: ./rule-providers/direct-ips.mrs
+    proxy: ⚡️ Авто
+    interval: 86400
+  github:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://cdn.jsdelivr.net/gh/hydraponique/roscomvpn-geosite/release/mihomo/github.mrs
+    path: ./rule-providers/github.mrs
+    proxy: ⚡️ Авто
+    interval: 86400
+  twitch-ads:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://cdn.jsdelivr.net/gh/hydraponique/roscomvpn-geosite/release/mihomo/twitch-ads.mrs
+    path: ./rule-providers/twitch-ads.mrs
+    proxy: ⚡️ Авто
+    interval: 86400
+  youtube:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://cdn.jsdelivr.net/gh/hydraponique/roscomvpn-geosite/release/mihomo/youtube.mrs
+    path: ./rule-providers/youtube.mrs
+    proxy: ⚡️ Авто
+    interval: 86400
+  telegram:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://cdn.jsdelivr.net/gh/hydraponique/roscomvpn-geosite/release/mihomo/telegram.mrs
+    path: ./rule-providers/telegram.mrs
+    proxy: ⚡️ Авто
+    interval: 86400
+  win-spy:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://cdn.jsdelivr.net/gh/hydraponique/roscomvpn-geosite/release/mihomo/win-spy.mrs
+    path: ./rule-providers/win-spy.mrs
+    proxy: ⚡️ Авто
+    interval: 86400
+  torrent-domains:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://cdn.jsdelivr.net/gh/hydraponique/roscomvpn-geosite/release/mihomo/torrent.mrs
+    path: ./rule-providers/torrent-domains.mrs
+    proxy: ⚡️ Авто
+    interval: 86400
+  category-ads:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://cdn.jsdelivr.net/gh/hydraponique/roscomvpn-geosite/release/mihomo/category-ads.mrs
+    path: ./rule-providers/category-ads.mrs
+    proxy: ⚡️ Авто
+    interval: 86400
+  torrent-clients:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://raw.githubusercontent.com/legiz-ru/mihomo-rule-sets/main/other/torrent-clients.yaml
+    path: ./rule-providers/torrent-clients.yaml
+    proxy: ⚡️ Авто
+    interval: 86400
+  games:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://raw.githubusercontent.com/roscomvpn/custom-category/release/mihomo/games.yaml
+    path: ./rule-providers/games.yaml
+    proxy: ⚡️ Авто
+    interval: 86400
+  ru-apps:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://raw.githubusercontent.com/roscomvpn/custom-category/release/mihomo/ru-apps.yaml
+    path: ./rule-providers/ru-apps.yaml
+    proxy: ⚡️ Авто
+    interval: 86400
+
+rules:
+  # --- Системные / приватные адреса ---
+  - RULE-SET,private-ips,DIRECT,no-resolve # приватные IP — всегда напрямую, без DNS
+  - IP-CIDR,::/0,REJECT-DROP,no-resolve # весь IPv6-трафик, не попавший в fake-ip — блок
+  - AND,((NETWORK,UDP),(DST-PORT,443)),REJECT-DROP # QUIC — принудительно через TCP
+  - RULE-SET,private-domains,DIRECT # локальные домены — напрямую
+
+  # --- 🤖 НЕЙРОСЕТИ — САМЫЙ ВЕРХ ---
+  # Стоят выше рекламы, Microsoft, RU-списков и всего остального,
+  # чтобы ни один другой список не перехватил их домены.
+  - RULE-SET,ai-extra,🤖 Нейросети # нейросети + капча/аналитика/авторизация/оплата
+  - RULE-SET,ai,🤖 Нейросети # category-ai-!cn
+  # Для Copilot: вход в аккаунт Microsoft через ту же страну. Без этих строк вход
+  # идёт через 🎮 Игры, а там по умолчанию 🔓 Без VPN — Microsoft видит российский IP.
+  # (вход в Xbox тогда тоже пойдёт через 🤖 Нейросети)
+  # - DOMAIN-SUFFIX,login.microsoftonline.com,🤖 Нейросети
+  # - DOMAIN-SUFFIX,login.live.com,🤖 Нейросети
+  # - DOMAIN-SUFFIX,msauth.net,🤖 Нейросети
+
+  # --- Блокировки ---
+  - RULE-SET,category-ads,REJECT-DROP # реклама
+  - RULE-SET,win-spy,REJECT-DROP # телеметрия Windows
+
+  # --- Торренты ---
+  - RULE-SET,torrent-domains,DIRECT # торрент-трекеры — напрямую
+
+  # --- Telegram по IP ---
+  - RULE-SET,telegram-ips,PROXY,no-resolve # IP Telegram (в SSClash попадают через Auto fake-ip whitelist)
+
+  # --- YouTube и Google ---
+  # YouTube раньше Google, т.к. список google включает домены YouTube
+  - RULE-SET,youtube,📺 Youtube
+  - RULE-SET,google,🤖 Нейросети # весь остальной Google — та же страна, что и нейросети
+  - RULE-SET,google-play,🤖 Нейросети # Google Play — туда же, чтобы аккаунт Google видел одну страну
+
+  # --- Microsoft / Xbox → 🎮 Игры (должны стоять выше category-ru / whitelist / games) ---
+  # Опционально: тяжёлые загрузки напрямую (раскомментируйте, если не хотите гнать их через VPN)
+  # - DOMAIN-SUFFIX,dl.delivery.mp.microsoft.com,DIRECT
+  # - DOMAIN-SUFFIX,assets1.xboxlive.com,DIRECT
+  # - DOMAIN-SUFFIX,assets2.xboxlive.com,DIRECT
+  - DOMAIN-SUFFIX,xboxlive.com,🎮 Игры
+  - DOMAIN-SUFFIX,xbox.com,🎮 Игры
+  - DOMAIN-SUFFIX,xboxservices.com,🎮 Игры
+  - DOMAIN-SUFFIX,gamepass.com,🎮 Игры
+  - DOMAIN-SUFFIX,microsoft.com,🎮 Игры
+  - DOMAIN-SUFFIX,microsoftonline.com,🎮 Игры
+  - DOMAIN-SUFFIX,live.com,🎮 Игры
+  - DOMAIN-SUFFIX,msauth.net,🎮 Игры
+  - DOMAIN-SUFFIX,msftconnecttest.com,🎮 Игры
+  - RULE-SET,microsoft,🎮 Игры
+
+  # --- Сервисы через PROXY ---
+  - RULE-SET,twitch-ads,PROXY # домены Twitch Ads — через PROXY (фикс качества)
+  - RULE-SET,telegram,PROXY
+  - RULE-SET,github,PROXY
+
+  # --- Игровые платформы и сервисы → 🎮 Игры (по умолчанию DIRECT, можно переключить) ---
+  - RULE-SET,epicgames,🎮 Игры
+  - RULE-SET,origin,🎮 Игры
+  - RULE-SET,riot,🎮 Игры
+  - RULE-SET,escapefromtarkov,🎮 Игры
+  - RULE-SET,steam,🎮 Игры
+  - RULE-SET,faceit,🎮 Игры
+
+  # --- Сервисы в DIRECT ---
+  - RULE-SET,twitch,DIRECT
+  - RULE-SET,apple,DIRECT
+  - RULE-SET,pinterest,DIRECT
+
+  # --- DIRECT ---
+  - RULE-SET,category-ru,DIRECT # RU-сайты, жесткая зависимость от whitelist
+  - RULE-SET,whitelist,DIRECT # RU-белосписочный
+
+  # --- Торренты ---
+  - RULE-SET,torrent-clients,DIRECT # торрент-клиенты по процессу
+
+  # --- Широкие категории ---
+  - RULE-SET,games,🎮 Игры # общая игровая категория
+  - RULE-SET,ru-apps,DIRECT # RU-приложения Android
+
+  # --- IP-адреса → DIRECT ---
+  - RULE-SET,direct-ips,DIRECT
+
+  # --- Всё остальное → PROXY ---
+  - MATCH,PROXY
