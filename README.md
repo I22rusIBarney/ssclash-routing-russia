@@ -9,7 +9,7 @@
 | Группа | Что делает |
 |---|---|
 | 🛡️ VPN | весь зарубежный трафик, по умолчанию ⚡️ Авто (узел с наименьшей задержкой) |
-| 🤖 Нейросети | ChatGPT, Claude, Gemini, Copilot, Perplexity, Grok, Cursor и др. — только ручной выбор узла, без РФ |
+| 🤖 Нейросети | ChatGPT, Claude, Gemini, Copilot, Perplexity, Grok, Cursor и др. — только ручной выбор узла (без РФ) или 🔓 Без VPN |
 | 📺 Youtube | YouTube отдельно, можно выбрать свой узел |
 | 🎮 Игры | Steam, Epic, Riot, Xbox, Microsoft — по умолчанию без VPN |
 
