@@ -118,6 +118,7 @@ proxy-groups:
     type: select
     proxies:
       - ⚡️ Авто
+      - 🔓 Без VPN
     # LEAVE THIS LINE!
     url: https://www.gstatic.com/generate_204
   - name: 📺 Youtube
@@ -129,6 +130,7 @@ proxy-groups:
     # filter: '🇫🇮 Finland' # Filter connections containing this value (hosts should be named like 🇫🇮 Finland1, 🇫🇮 Finland2, etc.)
     proxies:
       - 🛡️ VPN
+      - 🔓 Без VPN
       # Если хотите оставить на выбор только определенные узлы, воспользуйтесь filter
   - name: 🎮 Игры
     icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Game.png
@@ -143,8 +145,11 @@ proxy-groups:
       - 🛡️ VPN
   - name: 🤖 Нейросети
     icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Bot.png
-    # Только ручной выбор конкретного узла. Внутри нет ⚡️ Авто, 🛡️ VPN и DIRECT,
-    # поэтому страна сама по себе никогда не меняется.
+    # Только ручной выбор: конкретный узел или 🔓 Без VPN. Внутри нет ⚡️ Авто
+    # и 🛡️ VPN, поэтому страна сама по себе никогда не меняется.
+    # ВНИМАНИЕ: явные proxies в mihomo стоят в списке первыми, поэтому при самом
+    # первом запуске (пустой cache.db) выбран 🔓 Без VPN — выберите узел один раз,
+    # дальше выбор сохраняется.
     # Если нейронка ругается на регион — сначала проверьте /cdn-cgi/trace (см. шапку):
     # переключение узла лишь рвёт соединения, а причина обычно в обходе мимо VPN.
     type: select
@@ -152,6 +157,8 @@ proxy-groups:
     remnawave:
       include-proxies: false
     include-all: true
+    proxies:
+      - 🔓 Без VPN
   - name: ⚡️ Авто
     type: url-test
     tolerance: 150
